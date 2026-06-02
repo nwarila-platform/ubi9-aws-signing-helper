@@ -1,0 +1,66 @@
+{
+  "schema_version": "2.0",
+  "image": {
+    "name": "ubi9-aws-signing-helper",
+    "rhel_version": "9",
+    "platforms": [
+      "linux/amd64",
+      "linux/arm64"
+    ]
+  },
+  "base": {
+    "builder": "registry.access.redhat.com/ubi9/ubi-minimal@sha256:ae09ecc3d754bc1726cbda3e2599cc7839e09fe1cc547ce173cf669b645be3cc",
+    "runtime": "registry.access.redhat.com/ubi9/ubi-micro@sha256:b498b3ea26111ab4b81d65139f2ebd2ef9a2abb7a4588b7fdcc54889f95e9caa"
+  },
+  "dnf": {
+    "packages": [
+      "ca-certificates"
+    ]
+  },
+  "application": {
+    "source": "go-binary",
+    "name": "aws_signing_helper",
+    "version": "1.8.2",
+    "binary_path": "/usr/local/bin/aws_signing_helper",
+    "build": {
+      "go_version": "1.24.13",
+      "go_image": "golang:1.24.13@sha256:d2d2bc1c84f7e60d7d2438a3836ae7d0c847f4888464e7ec9ba3a1339a1ee804",
+      "gofips140": "v1.0.0",
+      "cgo_enabled": "1",
+      "godebug": "fips140=on",
+      "source_repo": "github.com/aws/rolesanywhere-credential-helper",
+      "source_ref": "v1.8.2"
+    },
+    "verification": {
+      "type": "none",
+      "note": "Built FROM SOURCE inside containers/Dockerfile with the validated FIPS 140-3 Go Cryptographic Module v1.0.0 (CMVP #5247): GOFIPS140=v1.0.0, CGO_ENABLED=1, GODEBUG=fips140=on. aws_signing_helper is glibc-DYNAMIC (PKCS#11/TPM cgo support is compiled unconditionally), so a CGO_ENABLED=0 static build is not possible and a prebuilt vendor binary cannot carry GOFIPS140 provenance. The build asserts GOFIPS140=v1.0.0 + CGO_ENABLED=1 + the source module path via `go version -m` before the binary reaches the runtime stage. The from-source binary intentionally differs byte-for-byte from AWS's published reference binaries, which are recorded here only as a version reference, NOT a byte-match gate: amd64 sha256 7addb6eb6e84fcee6c9c013b895ea6ad01672188f1a52a61118d22c977c4432e (https://rolesanywhere.amazonaws.com/releases/1.8.2/X86_64/Linux/Amzn2023/aws_signing_helper); arm64 sha256 facb914fdef33bbc01db0b377c2b4307bce00a3837de47297bae024a227eadb4 (https://rolesanywhere.amazonaws.com/releases/1.8.2/Aarch64/Linux/Amzn2023/aws_signing_helper)."
+    }
+  },
+  "runtime": {
+    "user": "65532:65532",
+    "entrypoint": [
+      "/usr/local/bin/aws_signing_helper"
+    ],
+    "forbidden_executables": [
+      "/bin/sh",
+      "/bin/bash",
+      "/bin/dash",
+      "/bin/busybox",
+      "/usr/bin/dnf",
+      "/usr/bin/microdnf",
+      "/usr/bin/rpm",
+      "/usr/bin/yum",
+      "/usr/bin/curl",
+      "/usr/bin/wget"
+    ]
+  },
+  "evidence": {
+    "required": [
+      "buildkit-sbom",
+      "buildkit-provenance",
+      "github-artifact-attestation",
+      "cosign-signature",
+      "runtime-hardening"
+    ]
+  }
+}

@@ -1,0 +1,104 @@
+name: Reusable UBI image build
+
+# Build a UBI 9 (ubi-micro) image from a reviewed manifest and run the runtime
+# hardening assertions (no shell, no package manager, no curl/wget; rpmdb
+# preserved; CA bundle populated) against the resulting image.
+#
+# This image compiles aws_signing_helper FROM SOURCE inside the Dockerfile with
+# the validated FIPS 140-3 Go Cryptographic Module, so there is NO build_app.sh
+# prebuilt step and NO verify_app_shas SHA-match step: docker buildx runs the Go
+# compile (and the in-Dockerfile FIPS assertions) natively per arch.
+#
+# This is a local --load build for runtime testing. Persistent SBOM, provenance,
+# attestation, and signature evidence belong in publish-image.yaml, which exports
+# to a registry by digest. See docs/how-to/publish-image.md.
+#
+# Caller pattern:
+#   uses: ./.github/workflows/reusable-ubi-image-build.yaml
+#   with:
+#     manifest_path: examples/image-manifest.json
+#     image_tag: ubi9-aws-signing-helper:ci
+#   permissions:
+#     contents: read
+
+on:
+  workflow_call:
+    inputs:
+      manifest_path:
+        description: |
+          Relative path (from the calling repo's root) to the image
+          manifest the build pipeline should consume.
+        required: false
+        type: string
+        default: examples/image-manifest.json
+      image_tag:
+        description: |
+          Tag for the locally-loaded image. Used by build_image.sh,
+          runtime-hardening.sh, and the smoke-run step. Release pipelines push
+          by digest separately; this tag is for runtime testing only.
+        required: false
+        type: string
+        default: ubi9-aws-signing-helper:ci
+      platform:
+        description: |
+          Target platform (linux/amd64 or linux/arm64). The default --load
+          build is single-platform; multi-arch needs QEMU and is left to the
+          publish workflow.
+        required: false
+        type: string
+        default: linux/amd64
+      python_version:
+        description: Python version for the verify scripts.
+        required: false
+        type: string
+        default: "3.12"
+      timeout_minutes:
+        description: Job timeout.
+        required: false
+        type: number
+        default: 30
+
+permissions: {}
+
+jobs:
+  build:
+    name: build + hardening (${{ inputs.platform }})
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Build UBI image (compiles helper from source with FIPS module)
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          MANIFEST_PATH: ${{ inputs.manifest_path }}
+          PLATFORM: ${{ inputs.platform }}
+        run: bash tools/build_image.sh "${MANIFEST_PATH}" "${IMAGE_TAG}" "${PLATFORM}"
+
+      - name: Run runtime hardening assertions
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          MANIFEST_PATH: ${{ inputs.manifest_path }}
+        run: |
+          exp="$(python -c 'import json,os;print(json.load(open(os.environ["MANIFEST_PATH"]))["runtime"]["entrypoint"][0])')"
+          bash tests/runtime-hardening.sh "${IMAGE_TAG}" "${exp}"
+
+      - name: Smoke run the built image (--help proves the dynamic binary loads)
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: docker run --rm --network none "${IMAGE_TAG}" --help

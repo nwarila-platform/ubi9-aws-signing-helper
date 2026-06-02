@@ -1,0 +1,44 @@
+# =============================================================================
+# Deny-all .gitignore strategy per nwarila-platform/.github ADR-0003.
+# Anything not explicitly allowlisted below is ignored (notably dist/ build
+# outputs and downloaded scanner binaries, which must never be committed).
+# =============================================================================
+**
+
+!*/
+!.editorconfig
+!.gitattributes
+!.dockerignore
+!.gitignore
+!.markdownlint-cli2.jsonc
+!LICENSE
+!Makefile
+!README.md
+!SECURITY.md
+
+!.github/
+!.github/CODEOWNERS
+!.github/PULL_REQUEST_TEMPLATE.md
+!.github/renovate.json5
+!.github/workflows/
+!.github/workflows/*.yaml
+
+!containers/
+!containers/Dockerfile
+
+!contracts/
+!contracts/*.json
+
+!docs/
+!docs/**/*.md
+!docs/**/.gitkeep
+
+!examples/
+!examples/*.json
+
+!tests/
+!tests/*.sh
+
+!tools/
+!tools/*.py
+!tools/*.sh
