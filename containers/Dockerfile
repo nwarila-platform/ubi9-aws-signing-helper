@@ -52,6 +52,15 @@ RUN set -eux; \
     microdnf clean all; \
     rm -rf /rootfs/var/cache/* /var/cache/microdnf-installroot \
       /rootfs/var/log/dnf.log /rootfs/var/log/dnf.librepo.log /rootfs/var/log/hawkey.log; \
+    if rpm --root=/rootfs -q bash >/dev/null 2>&1; then \
+      rpm --root=/rootfs -e --nodeps --noscripts bash; \
+    fi; \
+    for shell in sh bash dash ash busybox ksh zsh tcsh csh; do \
+      rm -f "/rootfs/usr/bin/${shell}" "/rootfs/usr/sbin/${shell}"; \
+      if [ -e "/rootfs/usr/bin/${shell}" ] || [ -e "/rootfs/usr/sbin/${shell}" ]; then \
+        echo "shell '${shell}' survived in the runtime rootfs" >&2; exit 1; \
+      fi; \
+    done; \
     test -s /rootfs/var/lib/rpm/rpmdb.sqlite || test -s /rootfs/var/lib/rpm/Packages || \
       { echo "rpm database missing from rootfs; scanners would see zero packages" >&2; exit 1; }; \
     printf 'nonroot:x:65532:65532:AWS signing helper runtime user:/nonexistent:/usr/sbin/nologin\n' > /rootfs/etc/passwd; \
@@ -164,6 +173,13 @@ COPY --from=gobuild /out/aws_signing_helper /usr/local/bin/aws_signing_helper
 # Module at runtime; combined with the GOFIPS140=v1.0.0 build it runs the
 # validated module in approved mode.
 ENV GODEBUG=fips140=on
+
+# ubi-micro itself ships /usr/bin/bash (+ /usr/bin/sh); the COPY --from=rpm-rootfs
+# above overlays the assembled rootfs onto the base WITHOUT deleting files the
+# base already provides, so a shell removed in the builder rootfs can still be
+# present here via the base layer. Remove the shell again in the final image and
+# fail the build if any survives.
+RUN ["/bin/sh", "-c", "for s in sh bash dash ash busybox ksh zsh tcsh csh; do rm -f \"/usr/bin/$s\" \"/usr/sbin/$s\" \"/bin/$s\" \"/sbin/$s\"; done; for s in sh bash dash ash busybox; do if [ -e \"/usr/bin/$s\" ] || [ -e \"/usr/sbin/$s\" ]; then echo \"shell $s survived in runtime image\" >&2; exit 1; fi; done"]
 
 USER 65532:65532
 # `serve` and its flags are supplied as pod args, not baked into the image.
