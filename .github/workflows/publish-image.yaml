@@ -36,7 +36,7 @@ env:
   STIG_FAIL_ON: "high"
   # Pinned scanner versions (binary installs by exact version, NOT GitHub Action
   # SHAs): the integrator reviews each as a supply-chain pin.
-  TRIVY_VERSION: "0.58.1"
+  TRIVY_VERSION: "0.71.0"
   GRYPE_VERSION: "0.87.0"
 
 jobs:
