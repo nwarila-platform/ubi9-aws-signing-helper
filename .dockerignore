@@ -1,0 +1,5 @@
+# Keep the image build context minimal. The aws_signing_helper binary is NOT
+# copied from the build context: it is cloned + compiled from source inside the
+# Dockerfile's gobuild stage. Deny everything; nothing from the working tree is
+# needed in the context beyond what BuildKit reads implicitly.
+*

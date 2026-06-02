@@ -1,0 +1,31 @@
+name: CodeQL Analysis
+
+# Caller for the org-wide reusable-codeql workflow hosted in
+# nwarila-platform/.github. Extends the default `actions`-only language list to also
+# analyze the Python tooling under `tools/`. Renovate manages the SHA pin.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+  schedule:
+    - cron: "30 6 * * 0"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: nwarila-platform/.github/.github/workflows/reusable-codeql.yaml@1952b49c95a640734a7549a5d748477b7d74792e
+    with:
+      languages: '["actions","python"]'
