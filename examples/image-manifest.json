@@ -23,8 +23,8 @@
     "version": "1.8.2",
     "binary_path": "/usr/local/bin/aws_signing_helper",
     "build": {
-      "go_version": "1.24.13",
-      "go_image": "golang:1.24.13@sha256:d2d2bc1c84f7e60d7d2438a3836ae7d0c847f4888464e7ec9ba3a1339a1ee804",
+      "go_version": "1.25.10",
+      "go_image": "golang:1.25.10@sha256:c138bff780910acf4254ab3a6f7ff0f64bbd841f27bd82bfa986fe122c109538",
       "gofips140": "v1.0.0",
       "cgo_enabled": "1",
       "godebug": "fips140=on",

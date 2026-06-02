@@ -16,7 +16,7 @@
 This image compiles `aws_signing_helper` (the AWS IAM Roles Anywhere credential
 helper) **from source** inside the Dockerfile's `gobuild` stage with the
 validated FIPS 140-3 **Go Cryptographic Module v1.0.0** (CMVP #5247): builder
-`golang:1.24.13` pinned by `@sha256:`, `GOFIPS140=v1.0.0`, `CGO_ENABLED=1`,
+`golang:1.25.10` pinned by `@sha256:`, `GOFIPS140=v1.0.0`, `CGO_ENABLED=1`,
 `GOTOOLCHAIN=local`, and runtime `GODEBUG=fips140=on`. It does **not** copy a
 prebuilt vendor binary the way the rest of the portfolio does, because the helper
 is glibc-DYNAMIC by necessity and a prebuilt binary cannot carry `GOFIPS140`
@@ -86,7 +86,7 @@ properties in the build itself.
 
 Chosen option: **3 — compile from source with the validated FIPS module**.
 
-The Dockerfile's `gobuild` stage (`FROM golang:1.24.13@sha256:...`) installs the
+The Dockerfile's `gobuild` stage (`FROM golang:1.25.10@sha256:...`) installs the
 cgo C toolchain (`gcc`) plus `git`, clones the pinned upstream tag, builds with
 `GOFIPS140=v1.0.0 CGO_ENABLED=1 GOTOOLCHAIN=local`, and then asserts the FIPS
 build properties before the binary may reach the runtime stage:
@@ -108,14 +108,29 @@ which avoids cgo cross-compilation entirely.
 Upstream `v1.8.2`'s `go.mod` declares `go 1.26.0` with `toolchain go1.26.2`. The
 validated Go Cryptographic Module v1.0.0 (CMVP #5247) is selectable only in Go
 1.24/1.25, and `GOTOOLCHAIN=local` (mandated so no unvalidated toolchain is ever
-downloaded) means a `golang:1.24.13` builder refuses to build a module whose
+downloaded) means a `golang:1.25.10` builder refuses to build a module whose
 language floor is `1.26.0`. The build therefore lowers the `go` directive to the
 validated toolchain's language version and drops the `toolchain` pin
 (`GO_MOD_GO_DIRECTIVE`, default `1.24.0`). This is a build-time reconciliation of
 the **language floor** only; no source is patched. The build was validated
-empirically: with the directive lowered, `golang:1.24.13` compiles the binary
+empirically: with the directive lowered, `golang:1.25.10` compiles the binary
 and `go version -m` records `GOFIPS140=v1.0.0-c2097c7c` (the `-c2097c7c` snapshot
 suffix is Go's identifier for the validated v1.0.0 module) and `CGO_ENABLED=1`.
+
+### Go toolchain bump 1.24.13 -> 1.25.10 (stdlib security fixes)
+
+The Go builder was bumped from `golang:1.24.13` to `golang:1.25.10` to pick up Go
+1.25.10's standard-library security fixes. The 1.24.13 stdlib carried 12 fixable
+HIGH-severity CVEs across `net/url`, `crypto/x509`, `crypto/tls`, `net`,
+`golang.org/x/net/http2`, `net/mail`, and `net/http/httputil` (ReverseProxy DoS) —
+CVE-2026-25679, -32280, -32281, -32283, -33811, -33814, -39820, -39823, -39825,
+-39826, -39836, and -42499 — all of which compile into the from-source binary's
+linked stdlib and are resolved by Go 1.25.10. The bump is **FIPS-preserving**: Go
+1.25 still ships the validated Go Cryptographic Module v1.0.0 (CMVP #5247),
+selected via `GOFIPS140=v1.0.0`, and 1.25.10 stays under the Renovate `<1.26.0`
+cap that guards against an unvalidated Go 1.26 module being substituted. The
+go.mod language-floor reconciliation above is unchanged: a 1.25.10 toolchain
+builds the directive-lowered module exactly as the 1.24.13 toolchain did.
 
 ## Pros and Cons of the Options
 
