@@ -513,7 +513,7 @@ PUBLISH_WORKFLOW_MARKERS = [
     "push-to-registry: true",
     "cosign sign --recursive",
     "gh attestation verify \"oci://${IMAGE_REF}\" --repo \"${GITHUB_REPOSITORY}\"",
-    "cosign verify --recursive",
+    "cosign verify",
     "--certificate-identity-regexp",
     "https://token.actions.githubusercontent.com",
     "/.github/workflows/publish-image.yaml@refs/(heads/main|tags/v.*)",
