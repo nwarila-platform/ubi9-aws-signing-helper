@@ -56,6 +56,7 @@ def build_invocation(manifest: dict[str, Any]) -> dict[str, Any]:
     build_args["GO_IMAGE"] = go_image
     build_args["SOURCE_REPO"] = build["source_repo"]
     build_args["SOURCE_REF"] = build["source_ref"]
+    build_args["SOURCE_COMMIT"] = build["source_commit"]
 
     build_args["OCI_TITLE"] = image["name"]
 

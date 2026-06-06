@@ -1,54 +1,52 @@
-# Mirroring And Consumer Baseline
+# Baseline Mirroring And Local Divergence
 
-This template is intentionally split into a shared repo-quality baseline, the
-manifest-driven build tooling, and the starter application that downstream
-repositories replace.
+This repository carries three documentation scopes:
 
-## Required Shared Baseline
+- `docs/decision-records/org/` mirrors accepted organization ADRs from
+  `nwarila-platform/.github`.
+- `docs/decision-records/template/` mirrors accepted UBI 9 image-pattern ADRs
+  that still apply to this repository.
+- `docs/decision-records/repo/` records local decisions for
+  `ubi9-aws-signing-helper`.
 
-Derived image repositories should keep these files close to the template unless
-they have a documented reason to diverge:
+The local repository is not a scaffold. It may diverge from the inherited UBI 9
+image pattern when the AWS helper requires a different implementation, but the
+reason must be explicit in a repo-scoped ADR.
 
-- `.github/PULL_REQUEST_TEMPLATE.md`
-- `.github/renovate.json5`
-- `.markdownlint-cli2.jsonc`
-- `contracts/image-manifest.schema.json`
-- `tests/runtime-hardening.sh`
-- `tools/check_image_manifest.py`
-- `tools/generate_build_args.py`
-- `tools/build_image.sh`
-- `tools/verify_app_shas.py`
-- `tools/verify.py`
-- `docs/reference/image-manifest.md`
-- `docs/reference/runtime-hardening.md`
-- `docs/reference/supply-chain-evidence.md`
+## Current Local Divergence
 
-## Starter Layer
+Repo ADR-0001 records the main divergence: `aws_signing_helper` is compiled from
+upstream source inside `containers/Dockerfile` with the validated Go FIPS module.
+That local decision changes the manifest shape, build-args generator output,
+Dockerfile stages, CI build path, publish workflow evidence, and documentation
+for this image.
 
-These files are meant to be edited immediately in downstream repositories:
+## Files That Should Stay Locally Accurate
+
+When inherited baseline text conflicts with this repository's source-build
+model, update the local file instead of preserving inaccurate template prose.
+The most important local files are:
 
 - `README.md`
-- `examples/image-manifest.json` (rename and move into your repository as the
-  canonical manifest path you want to ship under)
-- `app/` (replace with the real application source or remove if the artifact
-  is fetched from a vendor release)
-- `tools/build_app.sh` (rewrite to build or fetch the real artifact; keep the
-  output filenames and locations the manifest expects)
+- `examples/image-manifest.json`
 - `containers/Dockerfile`
+- `tools/build_image.sh`
+- `tools/check_image_manifest.py`
+- `tools/generate_build_args.py`
+- `tools/check_compliance_checklist.py`
+- `tools/verify.py`
+- `tests/runtime-hardening.sh`
+- `.github/workflows/reusable-ubi-image-build.yaml`
+- `.github/workflows/publish-image.yaml`
 - `docs/explanation/*`
 - `docs/how-to/*`
+- `docs/reference/*`
+- `docs/compliance/*`
 - `docs/decision-records/repo/*`
 
-## New Image Repository Checklist
+## Review Rule
 
-1. Rewrite the README for the real application image.
-2. Replace `app/` and `tools/build_app.sh` with whatever produces the real
-   `dist/app-{amd64,arm64}` artifacts (or update the manifest's
-   `application.artifacts[].path` values to wherever your build deposits them).
-3. Replace `examples/image-manifest.json` with real pins for the new
-   application.
-4. Update the Dockerfile only if the application stage needs a different
-   verification surface than per-arch SHA256.
-5. Add a release workflow that publishes, signs, and attests the image.
-6. Run `python tools/verify.py ci` and `make image` locally.
-7. Confirm CI's `image build + hardening` job passes for the new image.
+A local document should describe mechanisms that exist in this repository. If a
+claim depends on future source-integrity work, release promotion policy, or
+deployment configuration, document it as a gap or out-of-scope control rather
+than as implemented evidence.

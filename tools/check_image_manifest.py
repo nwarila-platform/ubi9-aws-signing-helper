@@ -12,6 +12,7 @@ from typing import Any
 
 
 HEX64 = re.compile(r"^[a-f0-9]{64}$")
+HEX40 = re.compile(r"^[a-f0-9]{40}$")
 PLATFORM = re.compile(r"^linux/(amd64|arm64)$")
 PKG = re.compile(r"^[a-zA-Z0-9._+-]+$")
 REPO_ID = re.compile(r"^[a-zA-Z0-9._-]+$")
@@ -205,10 +206,16 @@ def validate_manifest(manifest: dict[str, Any], *, template: bool) -> None:
         build = application["build"]
         require_keys(
             build,
-            {"go_version", "gofips140", "cgo_enabled", "source_repo", "source_ref"},
+            {"go_version", "gofips140", "cgo_enabled", "source_repo", "source_ref", "source_commit"},
             "application.build",
         )
         require(build["cgo_enabled"] in {"0", "1"}, "application.build.cgo_enabled must be '0' or '1'")
+        match_or_placeholder(
+            HEX40,
+            build["source_commit"],
+            template,
+            "application.build.source_commit must be a 40-char git commit SHA",
+        )
         if "go_image" in build:
             match_or_placeholder(
                 DIGEST_PINNED, build["go_image"], template,

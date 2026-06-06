@@ -1,7 +1,7 @@
 # Compliance
 
 This directory records source-bounded control applicability for the
-`ubi9-application-template` image.
+`ubi9-aws-signing-helper` image.
 
 | Checklist | Scope |
 | --- | --- |

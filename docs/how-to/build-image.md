@@ -1,11 +1,9 @@
 # Build The Image
 
-This repository builds `aws_signing_helper` **FROM SOURCE** with the validated
-FIPS 140-3 Go Cryptographic Module inside the Dockerfile (see
-[repo ADR-0001](../decision-records/repo/0001-helper-go-native-fips.md)). Unlike
-the copy-verified-prebuilt template, there is no `dist/` binary and no
-`build_app.sh` / `verify_app_shas.py` step: `docker buildx` clones and compiles
-the helper natively per architecture (under QEMU for cross-arch).
+This repository builds `aws_signing_helper` from upstream source inside
+`containers/Dockerfile` with the validated FIPS 140-3 Go Cryptographic Module.
+The local build path compiles the helper during `docker buildx build`; there is
+no separate application-binary staging step.
 
 ## End-To-End
 
@@ -15,63 +13,68 @@ make image
 
 This runs:
 
-1. `tools/build_image.sh` - renders the docker buildx flags from the manifest
-   via `tools/generate_build_args.py` (UBI bases, dnf package set, and the
-   `GO_IMAGE` / `SOURCE_REPO` / `SOURCE_REF` from `application.build`), then runs
-   `docker buildx build` for `linux/amd64` and loads the result into the local
-   Docker daemon for testing. Inside the build, the `gobuild` stage clones the
-   pinned upstream tag, compiles with `GOFIPS140=v1.0.0 CGO_ENABLED=1
-   GOTOOLCHAIN=local`, and asserts the FIPS build properties (`go version -m`
-   showing `GOFIPS140=v1.0.0` + `CGO_ENABLED=1`, the source module path, and a
-   dynamic ELF interpreter) before the binary reaches the runtime stage.
-2. `tests/runtime-hardening.sh` - exports the rootfs of the built image and
-   asserts no shell, no dnf/microdnf/rpm/yum, no curl or wget, the rpmdb present,
-   the CA bundle populated, a non-root runtime user, and the expected entrypoint.
+1. `tools/build_image.sh`, which calls `tools/generate_build_args.py` to render
+   Docker Buildx flags from `examples/image-manifest.json`, then builds the UBI
+   9 image for `linux/amd64` and loads it into the local Docker daemon.
+2. `tests/runtime-hardening.sh`, which exports the built image rootfs and checks
+   for the runtime hardening contract.
 
-The local `--load` path is not an evidence path. Docker does not preserve
-BuildKit SBOM attestations in the local image store, and the helper disables
-BuildKit provenance explicitly. Use
-[`publish-image.md`](publish-image.md) when wiring a downstream release job.
-
-## Inputs (Manifest Pins)
-
-The reviewed `examples/image-manifest.json` is the single source of truth:
-
-1. Pin the `ubi-minimal` builder image by digest in `base.builder`.
-2. Pin the `ubi-micro` runtime image by digest in `base.runtime`.
-3. Choose the minimum `dnf.packages` the runtime rootfs needs (here just
-   `ca-certificates`). Add `dnf.repos` only if the build must enable specific
-   repository IDs exclusively instead of the base image's defaults.
-4. Record the from-source build provenance under `application.build`: the
-   `go_image` (pinned `golang` tag@sha256, capped below Go 1.26 by Renovate so
-   the validated `GOFIPS140` module stays valid), `gofips140`, `cgo_enabled`,
-   `godebug`, `source_repo`, and `source_ref`. There is no prebuilt
-   `application.artifacts`; `verification.type` is `none` with a note explaining
-   the from-source FIPS build.
-
-Do not pass secrets through Docker build args. If a future build needs private
-fetch credentials, use BuildKit secrets and keep them out of the final image and
-provenance-visible build arguments.
-
-### Build From The Manifest
-
-The recommended pattern reads the build args from the manifest rather than
-duplicating them:
+Inside the Dockerfile, the `gobuild` stage checks out the manifest-pinned
+`SOURCE_COMMIT` (resolved from release tag `SOURCE_REF`) and fails closed unless
+the checkout `HEAD` equals that commit, reconciles the upstream `go.mod`
+directive to the validated toolchain's language level, and compiles with:
 
 ```sh
-# Single-platform build that loads the image into the local Docker daemon.
-bash tools/build_image.sh path/to/image-manifest.json my-image:dev linux/amd64
+GOFIPS140=v1.0.0 CGO_ENABLED=1 GOTOOLCHAIN=local
 ```
 
-To bypass the helper and call docker buildx directly in a release workflow that
-needs `--push`, multi-platform output, and BuildKit attestations:
+The build fails before runtime assembly unless `go version -m` records
+`GOFIPS140=v1.0.0`, `CGO_ENABLED=1`, and the upstream module path, and unless
+`readelf` finds a dynamic ELF interpreter.
+
+## Inputs
+
+The reviewed manifest is the single source of truth for build inputs:
+
+1. `base.builder` pins the `ubi-minimal` builder image by digest.
+2. `base.runtime` pins the `ubi-micro` runtime image by digest.
+3. `dnf.packages` lists the minimum RPM package set for the runtime rootfs.
+4. `application.build.go_image` pins the Go builder image by tag and digest.
+5. `application.build.source_repo`, `application.build.source_ref`, and
+   `application.build.source_commit` select and pin the upstream helper source;
+   the Dockerfile checks out `source_commit` and fails closed on mismatch.
+6. `runtime.user`, `runtime.entrypoint`, and `runtime.forbidden_executables`
+   define the runtime hardening contract.
+
+`application.verification.type` is currently `none`. That is intentional and
+honest: the upstream source IS pinned to an immutable commit SHA
+(`source_commit`, enforced fail-closed), and this build asserts FIPS/cgo/module
+provenance on the compiled binary, but it does not verify a signed upstream
+source checksum or a publisher tag signature (upstream `v1.8.2` is a lightweight
+tag with no signed tag object).
+
+Do not pass secrets through Docker build args. BuildKit max provenance can
+expose build argument values. If a future build needs private fetch credentials,
+use BuildKit secrets and keep them out of the final image and provenance-visible
+arguments.
+
+## Build From A Manifest
+
+Use the helper for local runtime testing:
 
 ```sh
-mapfile -t buildargs < <(python tools/generate_build_args.py path/to/image-manifest.json)
+bash tools/build_image.sh examples/image-manifest.json ubi9-aws-signing-helper:dev linux/amd64
+```
+
+To call Docker Buildx directly in a release workflow that needs registry push,
+multi-platform output, and BuildKit attestations:
+
+```sh
+mapfile -t buildargs < <(python tools/generate_build_args.py examples/image-manifest.json)
 
 docker buildx build \
   --file containers/Dockerfile \
-  --tag ghcr.io/<owner>/<image>:<version> \
+  --tag ghcr.io/OWNER/ubi9-aws-signing-helper:VERSION \
   "${buildargs[@]}" \
   --provenance=mode=max \
   --sbom=true \
@@ -79,20 +82,17 @@ docker buildx build \
   .
 ```
 
-`tools/generate_build_args.py` emits one token per line (alternating
-`--build-arg` and `KEY=VALUE`) so that `mapfile -t` produces an array suitable
-for `"${buildargs[@]}"` expansion without shell-quoting concerns. Use
-`--format=json` instead when feeding values into a GitHub Actions matrix.
-
-The Dockerfile's `gobuild` stage compiles the helper for the active `TARGETARCH`
-natively (buildx runs it under QEMU for cross-arch), and fails the build if the
-`go version -m` FIPS assertions do not hold.
+`tools/generate_build_args.py` emits one token per line so `mapfile -t`
+produces an array suitable for `"${buildargs[@]}"` expansion. Use
+`--format=json` when a workflow needs structured values.
 
 ## Verify Runtime Hardening
 
 ```sh
-tests/runtime-hardening.sh <image-ref>
+tests/runtime-hardening.sh <image-ref> /usr/local/bin/aws_signing_helper
 ```
 
-The script exports the image filesystem and checks for forbidden runtime tools
-without needing the application to start successfully.
+The script inspects the exported image filesystem for forbidden tools, rpmdb and
+CA bundle presence, non-root execution, dropped capabilities guidance,
+read-only-rootfs compatibility, setuid/setgid files, and expected entrypoint
+metadata.

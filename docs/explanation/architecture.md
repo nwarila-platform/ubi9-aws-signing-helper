@@ -1,61 +1,76 @@
 # Architecture
 
-`ubi9-application-template` is the reference template for one-application
-Red Hat UBI 9 image repositories. It owns the reusable contract and ships a
-working example image so the contract is exercised end-to-end on every change.
+`ubi9-aws-signing-helper` is a concrete UBI 9 container image for the AWS IAM
+Roles Anywhere Credential Helper. It builds `aws_signing_helper` from upstream
+source inside `containers/Dockerfile` so the resulting binary can record the
+validated Go FIPS module provenance this repository requires.
 
-## Template Boundary
+## Repository Boundary
 
-The template owns:
+This repository owns:
 
-- A manifest shape (schema v2) that records the base images, the `dnf` packages
-  installed into the runtime rootfs, the application artifacts, runtime policy,
-  and required evidence.
-- A manifest-to-build-args generator so the manifest is the single review
-  surface for buildx invocations.
-- A Dockerfile pattern that assembles a runtime root filesystem with
-  `dnf --installroot` in a `ubi-minimal` builder stage and starts the final
-  image `FROM ubi-micro`.
-- A deliberately useless example Go application under `app/`, built
-  deterministically inside a pinned `golang` container, that proves the full
-  pipeline works on every CI run.
-- Runtime hardening assertions that the example image and downstream images
-  must pass.
-- Documentation for expected SBOM, provenance, signature, and attestation
-  evidence.
-- A CI workflow that builds the example image and runs the hardening checks
-  against it on every push and pull request.
+- A manifest shape that records the reviewed UBI base image digests, the minimum
+  RPM package set, the Go builder image, the upstream helper repository and
+  `SOURCE_REF`, runtime policy, and required release evidence.
+- A manifest-to-build-args generator so `examples/image-manifest.json` stays the
+  single review surface for Docker build inputs.
+- A three-stage Dockerfile:
+  - `rpm-rootfs` assembles a minimal UBI 9 runtime rootfs with GPG-checked
+    `microdnf` and preserves `/var/lib/rpm` for scanners.
+  - `gobuild` clones the upstream helper tag, compiles with
+    `GOFIPS140=v1.0.0`, `CGO_ENABLED=1`, and `GOTOOLCHAIN=local`, and asserts
+    FIPS/cgo/module provenance with `go version -m` plus dynamic ELF linkage
+    with `readelf`.
+  - `runtime` starts from `ubi-micro`, copies only the rootfs and helper binary,
+    removes shell entry points, sets `GODEBUG=fips140=on`, and runs as
+    `65532:65532`.
+- Runtime hardening assertions in `tests/runtime-hardening.sh`.
+- Local and CI contract checks in `tools/verify.py`.
+- A release workflow that builds and pushes by digest with BuildKit SBOM and
+  provenance, GitHub artifact attestations, recursive keyless Cosign signing,
+  OpenSCAP, Trivy, Grype, runtime hardening, and anonymous GHCR pull checks.
 
-It does not own:
-
-- A shared mutable base image.
-- Application-specific upstream verification rules.
-- Registry publication, promotion, or environment approval policy.
-- Cosign signing and GitHub artifact attestation upload (those bind to a
-  publish destination the template does not own).
+This repository does not claim upstream source signature verification. The
+manifest records `application.verification.type` as `none`; the Dockerfile
+fetches `SOURCE_REF` as an upstream git tag and does not verify a signed source
+checksum or a pinned commit SHA.
 
 ## Build Flow
 
-The expected downstream build has three layers:
+The build has five reviewable steps:
 
-1. **Input review.** The image manifest records the `ubi-minimal` builder and
-   `ubi-micro` runtime digests, the `dnf.packages` list (and optional
-   `dnf.repos`), the application artifact checksums, runtime policy, and
-   required evidence.
-2. **Root filesystem construction.** The `ubi-minimal` builder stage runs
-   `dnf install --installroot=/rootfs` for the manifest's packages, prunes only
-   the regenerable dnf cache and logs, and verifies that the rpm database under
-   `/rootfs/var/lib/rpm` survives so scanners can enumerate installed packages.
-3. **Runtime assembly.** The final image starts `FROM ubi-micro`, copies the
-   assembled rootfs and the verified application binary, runs as `65532:65532`,
-   and exposes only the application entrypoint. `ubi-micro` ships glibc and the
-   CA bundle at `/etc/pki/tls/certs/ca-bundle.crt` but no shell and no package
-   manager.
+1. **Input review.** `examples/image-manifest.json` records the UBI base image
+   digests, `dnf.packages`, `application.build.go_image`,
+   `application.build.source_repo`, `application.build.source_ref`, runtime
+   policy, and required evidence.
+2. **Root filesystem construction.** The `ubi-minimal` stage installs the
+   manifest-selected RPM packages into `/rootfs`, removes regenerable cache and
+   logs, synthesizes the non-root account, and fails if the rpm database is not
+   preserved for scanners.
+3. **Helper compile.** The Go builder stage installs only the cgo build tools it
+   needs, clones the upstream helper tag, reconciles the upstream `go.mod`
+   directive to the validated FIPS toolchain's language level, and compiles the
+   helper for the active Buildx `TARGETARCH`.
+4. **Build assertions.** Before the binary can enter the runtime stage, the
+   Dockerfile requires `go version -m` to show `GOFIPS140=v1.0.0`,
+   `CGO_ENABLED=1`, and the AWS upstream module path. It also requires `readelf`
+   to find a dynamic ELF interpreter because the helper's PKCS#11/TPM support
+   uses cgo.
+5. **Runtime assembly.** The final image copies the assembled rootfs and helper
+   binary into `ubi-micro`, removes shell binaries that can arrive from the base
+   layer, sets FIPS mode activation with `GODEBUG=fips140=on`, and exposes only
+   `/usr/local/bin/aws_signing_helper`.
+
+Local builds use Docker's `--load` exporter so the hardening script can inspect
+the image. Release builds use registry push by digest because SBOM, provenance,
+attestation, signature, and scan evidence belongs to the pushed image digest.
 
 ## External Dependencies
 
-- Red Hat UBI 9 base images (`ubi-minimal` builder, `ubi-micro` runtime) and the
-  RHEL 9 dnf repositories they ship.
-- Docker BuildKit and Buildx for SBOM and provenance attestations.
-- GitHub Actions for CI and artifact attestations in downstream repositories.
-- Sigstore Cosign for image signatures.
+- Red Hat UBI 9 base images and the Red Hat repositories used by `microdnf`.
+- The pinned digest-addressed Go builder image recorded in the manifest.
+- `github.com/aws/rolesanywhere-credential-helper` at the manifest-selected
+  upstream release tag.
+- Docker Buildx and QEMU for multi-platform builds.
+- GitHub Actions, GitHub artifact attestations, Sigstore Cosign, OpenSCAP,
+  Trivy, and Grype for release evidence.

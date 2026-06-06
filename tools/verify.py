@@ -56,6 +56,7 @@ ADR_HEADINGS = [
 # nwarila-platform/.github. This local verifier checks presence, not byte
 # identity against the org source.
 EXPECTED_ORG_ADRS = {"0001", "0002", "0003", "0004", "0005"}
+SOURCE_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 
 
 class VerifyError(Exception):
@@ -88,7 +89,6 @@ def check_docs_layout() -> None:
     require((ROOT / "docs/README.md").is_file(), "missing docs/README.md")
     require((ROOT / "docs/decision-records/README.md").is_file(), "missing ADR index")
     for document in (
-        "docs/how-to/derive-image-repo.md",
         "docs/how-to/build-image.md",
         "docs/how-to/publish-image.md",
         "docs/reference/governance.md",
@@ -153,7 +153,10 @@ def check_dockerfile_contract() -> None:
         "CGO_ENABLED=1",
         "GOTOOLCHAIN=local",
         "GODEBUG=fips140=on",
-        "git clone --depth 1 --branch",
+        "git clone --filter=blob:none --no-checkout",
+        "git -C /src fetch --depth 1 origin \"${SOURCE_COMMIT}\"",
+        "git -C /src checkout --detach \"${SOURCE_COMMIT}\"",
+        "git -C /src rev-parse HEAD",
         "go build -trimpath -o /out/aws_signing_helper",
         "go version -m /out/aws_signing_helper",
         "COPY --from=rpm-rootfs /rootfs/ /",
@@ -206,6 +209,31 @@ def check_dockerfile_contract() -> None:
             "ARG BUILDKIT_SBOM_SCAN_STAGE=true" in stage_body,
             f"stage '{stage}' must declare ARG BUILDKIT_SBOM_SCAN_STAGE=true so BuildKit scans it",
         )
+
+
+def check_source_commit_pin() -> None:
+    manifest = json.loads((ROOT / "examples/image-manifest.json").read_text(encoding="utf-8"))
+    build = manifest["application"].get("build", {})
+    manifest_commit = build.get("source_commit")
+    require(
+        isinstance(manifest_commit, str) and SOURCE_COMMIT.fullmatch(manifest_commit) is not None,
+        "application.build.source_commit must be a 40-char git commit SHA",
+    )
+
+    dockerfile = (ROOT / "containers/Dockerfile").read_text(encoding="utf-8")
+    match = re.search(
+        r'^\s*ARG\s+SOURCE_COMMIT="(?P<commit>[0-9a-f]{40})"\s*$',
+        dockerfile,
+        flags=re.MULTILINE,
+    )
+    require(match is not None, "Dockerfile must define ARG SOURCE_COMMIT with a 40-char SHA default")
+    assert match is not None
+    dockerfile_commit = match.group("commit")
+    require(
+        dockerfile_commit == manifest_commit,
+        "Dockerfile SOURCE_COMMIT must match examples/image-manifest.json "
+        f"application.build.source_commit ({dockerfile_commit} != {manifest_commit})",
+    )
 
 
 def check_runtime_script() -> None:
@@ -288,6 +316,10 @@ def check_build_tool_pins() -> None:
         f"application.build.source_ref must be a release tag (vX.Y.Z): {build['source_ref']}",
     )
     require(
+        SOURCE_COMMIT.fullmatch(build["source_commit"]) is not None,
+        f"application.build.source_commit must be a 40-char git commit SHA: {build['source_commit']}",
+    )
+    require(
         re.fullmatch(r"golang:[A-Za-z0-9._-]+@sha256:[a-f0-9]{64}", build["go_image"]) is not None,
         "application.build.go_image must be a pinned golang tag@sha256",
     )
@@ -335,6 +367,7 @@ def check_build_args_generator() -> None:
         "GO_IMAGE",
         "SOURCE_REPO",
         "SOURCE_REF",
+        "SOURCE_COMMIT",
         "OCI_TITLE",
     }
     missing = sorted(expected_keys - set(build_args))
@@ -406,6 +439,29 @@ def check_stale_placeholders() -> None:
             if pattern.search(line):
                 findings.append(f"{path.relative_to(ROOT)}:{line_no}: {line.strip()}")
     require(not findings, "stale placeholders found:\n" + "\n".join(findings))
+
+
+PHANTOM_DOC_BUILD_PATHS = [
+    (re.compile(r"\bbuild_app\.sh\b"), "tools/build_app.sh"),
+    (re.compile(r"\bverify_app_shas(?:\.py)?\b"), "tools/verify_app_shas.py"),
+    (re.compile(r"(?<![\w.-])`?app/`?"), "app/"),
+    (re.compile(r"\bdist/app(?:-[A-Za-z0-9_*{}-]+)?\b"), "dist/app-*"),
+]
+
+
+def check_doc_phantom_build_paths() -> None:
+    findings: list[str] = []
+    for path in sorted((ROOT / "docs").rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            for pattern, label in PHANTOM_DOC_BUILD_PATHS:
+                if pattern.search(line):
+                    findings.append(f"{path.relative_to(ROOT)}:{line_no}: references phantom {label}")
+    require(
+        not findings,
+        "docs reference build paths that do not exist in this from-source image:\n"
+        + "\n".join(findings),
+    )
 
 
 # Universal quality-gate caller workflows. nwarila-platform repos use reusable
@@ -634,6 +690,7 @@ TARGETS = {
     "docs-layout": check_docs_layout,
     "manifest": check_manifest,
     "dockerfile-contract": check_dockerfile_contract,
+    "source-commit-pin": check_source_commit_pin,
     "runtime-script": check_runtime_script,
     "compliance-checklist": check_compliance_checklist,
     "build-tool-pins": check_build_tool_pins,
@@ -643,6 +700,7 @@ TARGETS = {
     "template-reusables": check_template_reusables,
     "publish-workflow": check_publish_workflow,
     "stale-placeholders": check_stale_placeholders,
+    "doc-phantom-build-paths": check_doc_phantom_build_paths,
     "markdown-links": check_markdown_links,
     "doc-workflow-refs": check_doc_workflow_refs,
 }
@@ -651,6 +709,7 @@ _ORDER = [
     "docs-layout",
     "manifest",
     "dockerfile-contract",
+    "source-commit-pin",
     "runtime-script",
     "compliance-checklist",
     "build-tool-pins",
@@ -660,6 +719,7 @@ _ORDER = [
     "template-reusables",
     "publish-workflow",
     "stale-placeholders",
+    "doc-phantom-build-paths",
     "markdown-links",
     "doc-workflow-refs",
 ]

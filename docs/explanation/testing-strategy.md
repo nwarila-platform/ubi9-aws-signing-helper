@@ -1,66 +1,76 @@
 # Testing Strategy
 
-The template builds and exercises a working example image so the manifest,
-Dockerfile, generator, and runtime hardening assertions are proven together
-on every change, not just described in isolation.
+The repository tests the image contract at three levels: fast Python checks,
+Docker build/runtime checks, and publish-time evidence checks against the
+pushed digest. The goal is to prove the build this repository actually performs:
+compile `aws_signing_helper` from upstream source inside the Dockerfile with the
+validated Go FIPS module, then ship it in a minimal UBI 9 runtime image.
 
 ## Contract Checks (`python tools/verify.py ci`)
 
-Run on every push and PR; no Docker required. Validates:
+Run on every push and pull request; no Docker is required. The CI target
+validates:
 
-- Diataxis and ADR directory layout.
-- The starter image manifest in strict mode, plus an in-process check that the
-  permissive template mode still accepts `REPLACE_WITH_*` markers for
-  downstream consumers.
-- Dockerfile contract markers that protect the `dnf --installroot` build pattern
-  and the preserved rpm database.
-- The build-args generator: every Dockerfile ARG (other than runtime-only
-  inputs) has a manifest source, and every generated arg has a matching
-  Dockerfile ARG.
-- The local image helper uses `--load` for runtime tests and disables
-  provenance so it is not mistaken for the release evidence path.
-- The example Go builder image is digest-pinned and tracked by Renovate.
-- Runtime hardening script coverage for forbidden tools.
-- Stale placeholder markers that indicate unfinished template text.
-- Local Markdown links, so documentation cannot point at missing release
-  guides or other repo files.
+- Diataxis documentation layout and required ADR mirrors.
+- The committed image manifest in strict mode.
+- Dockerfile contract markers for UBI 9 rootfs construction, preserved rpmdb,
+  from-source Go/FIPS build settings, and forbidden prebuilt-binary inputs.
+- Runtime hardening script coverage for forbidden tools, rpmdb presence, CA
+  bundle presence, non-root execution, read-only-rootfs compatibility, dropped
+  capabilities, and setuid/setgid rejection.
+- RHEL 9 STIG and CIS Docker applicability checklists.
+- The build-args generator, including parity between manifest-derived build
+  args and Dockerfile `ARG` declarations.
+- The local image build helper's `--load` behavior for runtime testing.
+- Security workflow pinning and repository-specific reusable workflow shape.
+- Publish workflow markers for BuildKit SBOM/provenance, GitHub artifact
+  attestation, recursive keyless Cosign signing, OpenSCAP, Trivy, Grype,
+  runtime hardening, and public GHCR pull verification.
+- Stale placeholders, local Markdown links, local workflow references in docs,
+  and docs references to phantom build paths.
 
-## End-To-End Image Build (CI `image-build` job)
+## Image Build And Runtime Checks
 
-Runs on every push and PR; needs Docker. Proves the entire pipeline by:
+The reusable image-build workflow runs a single-platform Docker Buildx build and
+loads the result into the local Docker daemon for inspection. During the
+Dockerfile build:
 
-1. Building `dist/app-{amd64,arm64}` in a digest-pinned `golang` container so
-   the binaries are byte-identical to the committed SHA256 values.
-2. Running `tools/verify_app_shas.py` to detect drift before the image build
-   begins.
-3. Generating docker buildx flags from the manifest via
-   `tools/generate_build_args.py` (no hand-typed duplication).
-4. Building and loading the UBI 9 OCI image for `linux/amd64`.
-5. Running `tests/runtime-hardening.sh` and executing the
-   image entrypoint to confirm it works.
+1. The `rpm-rootfs` stage installs only the manifest-selected RPM package set
+   into `/rootfs`, removes regenerable cache/logs, and fails if the rpm database
+   is absent.
+2. The `gobuild` stage clones the upstream AWS helper tag, compiles with
+   `GOFIPS140=v1.0.0`, `CGO_ENABLED=1`, and `GOTOOLCHAIN=local`, then requires
+   `go version -m` to record the FIPS/cgo/module provenance.
+3. The same stage uses `readelf` to prove the helper is a dynamic ELF before it
+   can be copied into the final runtime image.
+4. The `runtime` stage removes shell binaries, sets the non-root user, and
+   exposes only the helper entrypoint.
 
-The CI image build uses Docker's `--load` path so the runtime tests can inspect
-the image locally. BuildKit SBOM and provenance attestations are intentionally
-kept in the downstream publish flow, where the image is pushed by digest and
-the registry can store the attestation manifests.
+After the build, `tests/runtime-hardening.sh` exports the image filesystem and
+checks the runtime contract. CI also runs the image with `--help` under
+`--network none`; that proves the dynamic helper binary can start without
+turning a local build into release evidence.
 
-The example application is deliberately a one-line Go program. Any future
-breakage in the base-image pins, the `dnf --installroot` build, the Dockerfile,
-or the build helpers surfaces immediately as a CI failure on the template
-itself.
+## Publish Evidence
 
-## Downstream Additions
+Release evidence is generated only in `.github/workflows/publish-image.yaml`,
+where the image is pushed to GHCR by digest. That workflow:
 
-A real image repository should layer on:
+- Builds the multi-platform image from the same manifest-derived build args with
+  BuildKit SBOM and provenance enabled.
+- Generates and verifies a GitHub artifact attestation for the pushed digest.
+- Signs the pushed digest recursively with keyless Cosign and verifies the
+  expected GitHub Actions OIDC identity.
+- Runs OpenSCAP, Trivy, Grype, runtime hardening, and anonymous public pull
+  checks against the pushed digest.
 
-- Application-specific build and unit tests for the upstream artifact source.
-- Push to a registry with digest pinning.
-- GitHub artifact attestation upload for the pushed digest and SBOM.
-- Cosign or other signing of the image digest.
-- Production-grade scanning (Trivy/Grype) as a release gate.
+Docker's local `--load` exporter is intentionally limited to runtime tests. It
+does not preserve registry-backed attestation evidence, so release conclusions
+must be tied to the pushed digest.
 
-## Non-Goals
+## Known Gap
 
-The template does not include fake or decorative tests. Every check in CI
-exercises a real artifact or contract. Tests that depend on a real registry
-destination (push, sign, attest) belong in downstream repositories, not here.
+The Dockerfile fetches upstream source by release tag and the manifest records
+`application.verification.type` as `none`. The current tests prove the FIPS build
+properties and image-level release evidence, but they do not prove a signed
+upstream source checksum or a commit-SHA pin.
