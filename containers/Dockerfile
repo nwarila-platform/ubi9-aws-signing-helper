@@ -88,12 +88,14 @@ ENV GOFIPS140=v1.0.0 \
     GOTOOLCHAIN=local \
     GOFLAGS=-buildvcs=false
 
-# Source pins (manifest-driven). SOURCE_REF is the upstream release tag;
+# Source pins (manifest-driven). SOURCE_REF is the human-readable upstream
+# release tag; SOURCE_COMMIT is the immutable commit that the build checks out.
 # GO_MOD_GO_DIRECTIVE reconciles the upstream go.mod's go/toolchain directive
 # down to the validated FIPS toolchain's language version (see
 # docs/decision-records/repo/0001-helper-go-native-fips.md).
 ARG SOURCE_REPO="github.com/aws/rolesanywhere-credential-helper"
 ARG SOURCE_REF="v1.8.2"
+ARG SOURCE_COMMIT="871a6ce4a0395bce11748b5e59c03caaa43cbc43"
 ARG GO_MOD_GO_DIRECTIVE="1.24.0"
 
 # The cgo C toolchain (gcc) and git are required to clone + build with cgo.
@@ -104,7 +106,13 @@ RUN set -eux; \
 
 RUN set -eux; \
     test -n "${SOURCE_REF}"; \
-    git clone --depth 1 --branch "${SOURCE_REF}" "https://${SOURCE_REPO}.git" /src; \
+    test -n "${SOURCE_COMMIT}"; \
+    git clone --filter=blob:none --no-checkout "https://${SOURCE_REPO}.git" /src; \
+    git -C /src fetch --depth 1 origin "${SOURCE_COMMIT}"; \
+    git -C /src checkout --detach "${SOURCE_COMMIT}"; \
+    actual_source_commit="$(git -C /src rev-parse HEAD)"; \
+    test "${actual_source_commit}" = "${SOURCE_COMMIT}" || \
+      { echo "source checkout mismatch: expected ${SOURCE_COMMIT}, got ${actual_source_commit}" >&2; exit 1; }; \
     cd /src; \
     # Reconcile the upstream go.mod directive to the validated FIPS toolchain's
     # language level. The upstream v1.8.2 go.mod requires go >= 1.26.0, but the

@@ -185,9 +185,9 @@ builds the directive-lowered module exactly as the 1.24.13 toolchain did.
 - The image manifest gains an `application.build` block and drops the prebuilt
   `application.artifacts`; the schema and `check_image_manifest.py` make
   `artifacts` optional for a from-source `go-binary` and require `build` instead.
-- `generate_build_args.py` emits `GO_IMAGE`, `SOURCE_REPO`, and `SOURCE_REF`
-  instead of prebuilt-binary checksum arguments; `ci.yaml`, the reusable, and
-  `publish-image.yaml` compile the helper during the Dockerfile build.
+- `generate_build_args.py` emits `GO_IMAGE`, `SOURCE_REPO`, `SOURCE_REF`, and
+  `SOURCE_COMMIT` instead of prebuilt-binary checksum arguments; `ci.yaml`, the
+  reusable, and `publish-image.yaml` compile the helper during the Dockerfile build.
 - Bumping the upstream source ref may require revisiting the
   `GO_MOD_GO_DIRECTIVE` reconciliation if the new tag's language floor changes.
 

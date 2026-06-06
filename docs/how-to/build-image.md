@@ -19,9 +19,10 @@ This runs:
 2. `tests/runtime-hardening.sh`, which exports the built image rootfs and checks
    for the runtime hardening contract.
 
-Inside the Dockerfile, the `gobuild` stage clones the manifest-selected
-`SOURCE_REPO` at `SOURCE_REF`, reconciles the upstream `go.mod` directive to the
-validated toolchain's language level, and compiles with:
+Inside the Dockerfile, the `gobuild` stage checks out the manifest-pinned
+`SOURCE_COMMIT` (resolved from release tag `SOURCE_REF`) and fails closed unless
+the checkout `HEAD` equals that commit, reconciles the upstream `go.mod`
+directive to the validated toolchain's language level, and compiles with:
 
 ```sh
 GOFIPS140=v1.0.0 CGO_ENABLED=1 GOTOOLCHAIN=local
@@ -39,14 +40,18 @@ The reviewed manifest is the single source of truth for build inputs:
 2. `base.runtime` pins the `ubi-micro` runtime image by digest.
 3. `dnf.packages` lists the minimum RPM package set for the runtime rootfs.
 4. `application.build.go_image` pins the Go builder image by tag and digest.
-5. `application.build.source_repo` and `application.build.source_ref` select
-   the upstream helper source to clone during the Dockerfile build.
+5. `application.build.source_repo`, `application.build.source_ref`, and
+   `application.build.source_commit` select and pin the upstream helper source;
+   the Dockerfile checks out `source_commit` and fails closed on mismatch.
 6. `runtime.user`, `runtime.entrypoint`, and `runtime.forbidden_executables`
    define the runtime hardening contract.
 
 `application.verification.type` is currently `none`. That is intentional and
-honest: this build asserts FIPS/cgo/module provenance on the compiled binary,
-but it does not verify a signed upstream source checksum or a commit-SHA pin.
+honest: the upstream source IS pinned to an immutable commit SHA
+(`source_commit`, enforced fail-closed), and this build asserts FIPS/cgo/module
+provenance on the compiled binary, but it does not verify a signed upstream
+source checksum or a publisher tag signature (upstream `v1.8.2` is a lightweight
+tag with no signed tag object).
 
 Do not pass secrets through Docker build args. BuildKit max provenance can
 expose build argument values. If a future build needs private fetch credentials,

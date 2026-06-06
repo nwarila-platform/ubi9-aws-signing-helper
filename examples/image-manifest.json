@@ -29,11 +29,12 @@
       "cgo_enabled": "1",
       "godebug": "fips140=on",
       "source_repo": "github.com/aws/rolesanywhere-credential-helper",
-      "source_ref": "v1.8.2"
+      "source_ref": "v1.8.2",
+      "source_commit": "871a6ce4a0395bce11748b5e59c03caaa43cbc43"
     },
     "verification": {
       "type": "none",
-      "note": "Built FROM SOURCE inside containers/Dockerfile with the validated FIPS 140-3 Go Cryptographic Module v1.0.0 (CMVP #5247): GOFIPS140=v1.0.0, CGO_ENABLED=1, GODEBUG=fips140=on. aws_signing_helper is glibc-DYNAMIC (PKCS#11/TPM cgo support is compiled unconditionally), so a CGO_ENABLED=0 static build is not possible and a prebuilt vendor binary cannot carry GOFIPS140 provenance. The build asserts GOFIPS140=v1.0.0 + CGO_ENABLED=1 + the source module path via `go version -m` before the binary reaches the runtime stage. The from-source binary intentionally differs byte-for-byte from AWS's published reference binaries, which are recorded here only as a version reference, NOT a byte-match gate: amd64 sha256 7addb6eb6e84fcee6c9c013b895ea6ad01672188f1a52a61118d22c977c4432e (https://rolesanywhere.amazonaws.com/releases/1.8.2/X86_64/Linux/Amzn2023/aws_signing_helper); arm64 sha256 facb914fdef33bbc01db0b377c2b4307bce00a3837de47297bae024a227eadb4 (https://rolesanywhere.amazonaws.com/releases/1.8.2/Aarch64/Linux/Amzn2023/aws_signing_helper)."
+      "note": "Built FROM SOURCE inside containers/Dockerfile with the validated FIPS 140-3 Go Cryptographic Module v1.0.0 (CMVP #5247): GOFIPS140=v1.0.0, CGO_ENABLED=1, GODEBUG=fips140=on. Source acquisition keeps source_ref as the readable release label and pins SOURCE_COMMIT/application.build.source_commit to 871a6ce4a0395bce11748b5e59c03caaa43cbc43; the Dockerfile fails closed unless checkout HEAD equals that commit. aws_signing_helper is glibc-DYNAMIC (PKCS#11/TPM cgo support is compiled unconditionally), so a CGO_ENABLED=0 static build is not possible and a prebuilt vendor binary cannot carry GOFIPS140 provenance. The build asserts GOFIPS140=v1.0.0 + CGO_ENABLED=1 + the source module path via `go version -m` before the binary reaches the runtime stage. The from-source binary intentionally differs byte-for-byte from AWS's published reference binaries, which are recorded here only as a version reference, NOT a byte-match gate: amd64 sha256 7addb6eb6e84fcee6c9c013b895ea6ad01672188f1a52a61118d22c977c4432e (https://rolesanywhere.amazonaws.com/releases/1.8.2/X86_64/Linux/Amzn2023/aws_signing_helper); arm64 sha256 facb914fdef33bbc01db0b377c2b4307bce00a3837de47297bae024a227eadb4 (https://rolesanywhere.amazonaws.com/releases/1.8.2/Aarch64/Linux/Amzn2023/aws_signing_helper)."
     }
   },
   "runtime": {
