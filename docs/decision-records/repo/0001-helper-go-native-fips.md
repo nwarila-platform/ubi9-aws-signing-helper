@@ -186,8 +186,8 @@ builds the directive-lowered module exactly as the 1.24.13 toolchain did.
   `application.artifacts`; the schema and `check_image_manifest.py` make
   `artifacts` optional for a from-source `go-binary` and require `build` instead.
 - `generate_build_args.py` emits `GO_IMAGE`, `SOURCE_REPO`, and `SOURCE_REF`
-  instead of `APP_BINARY_*`/`APP_SHA256_*`; there is no `build_app.sh` /
-  `verify_app_shas.py` step in `ci.yaml`, the reusable, or `publish-image.yaml`.
+  instead of prebuilt-binary checksum arguments; `ci.yaml`, the reusable, and
+  `publish-image.yaml` compile the helper during the Dockerfile build.
 - Bumping the upstream source ref may require revisiting the
   `GO_MOD_GO_DIRECTIVE` reconciliation if the new tag's language floor changes.
 

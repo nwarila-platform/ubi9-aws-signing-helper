@@ -88,7 +88,6 @@ def check_docs_layout() -> None:
     require((ROOT / "docs/README.md").is_file(), "missing docs/README.md")
     require((ROOT / "docs/decision-records/README.md").is_file(), "missing ADR index")
     for document in (
-        "docs/how-to/derive-image-repo.md",
         "docs/how-to/build-image.md",
         "docs/how-to/publish-image.md",
         "docs/reference/governance.md",
@@ -408,6 +407,29 @@ def check_stale_placeholders() -> None:
     require(not findings, "stale placeholders found:\n" + "\n".join(findings))
 
 
+PHANTOM_DOC_BUILD_PATHS = [
+    (re.compile(r"\bbuild_app\.sh\b"), "tools/build_app.sh"),
+    (re.compile(r"\bverify_app_shas(?:\.py)?\b"), "tools/verify_app_shas.py"),
+    (re.compile(r"(?<![\w.-])`?app/`?"), "app/"),
+    (re.compile(r"\bdist/app(?:-[A-Za-z0-9_*{}-]+)?\b"), "dist/app-*"),
+]
+
+
+def check_doc_phantom_build_paths() -> None:
+    findings: list[str] = []
+    for path in sorted((ROOT / "docs").rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            for pattern, label in PHANTOM_DOC_BUILD_PATHS:
+                if pattern.search(line):
+                    findings.append(f"{path.relative_to(ROOT)}:{line_no}: references phantom {label}")
+    require(
+        not findings,
+        "docs reference build paths that do not exist in this from-source image:\n"
+        + "\n".join(findings),
+    )
+
+
 # Universal quality-gate caller workflows. nwarila-platform repos use reusable
 # workflows hosted in nwarila-platform/.github and pinned by 40-char SHA.
 ORG_REUSABLE_CALLER_WORKFLOWS = {
@@ -643,6 +665,7 @@ TARGETS = {
     "template-reusables": check_template_reusables,
     "publish-workflow": check_publish_workflow,
     "stale-placeholders": check_stale_placeholders,
+    "doc-phantom-build-paths": check_doc_phantom_build_paths,
     "markdown-links": check_markdown_links,
     "doc-workflow-refs": check_doc_workflow_refs,
 }
@@ -660,6 +683,7 @@ _ORDER = [
     "template-reusables",
     "publish-workflow",
     "stale-placeholders",
+    "doc-phantom-build-paths",
     "markdown-links",
     "doc-workflow-refs",
 ]

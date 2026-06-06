@@ -1,6 +1,6 @@
 # RHEL 9 STIG V2R8 Applicability Checklist
 
-This checklist records the image-scope decision for every rule in the DISA Red Hat Enterprise Linux 9 STIG V2R8. The target is the `ubi9-application-template` final OCI image, not a full RHEL 9 host and not the Kubernetes/node deployment that will run it.
+This checklist records the image-scope decision for every rule in the DISA Red Hat Enterprise Linux 9 STIG V2R8. The target is the `ubi9-aws-signing-helper` final OCI image, not a full RHEL 9 host and not the Kubernetes/node deployment that will run it.
 
 ## Source
 
@@ -35,8 +35,9 @@ This checklist records the image-scope decision for every rule in the DISA Red H
 
 ## Baseline Evidence
 
-- `containers/Dockerfile` builds the final image `FROM` Red Hat `ubi-micro`, installs only the application binary, its shared libraries, and the CA bundle at `/etc/pki/tls/certs/ca-bundle.crt`, sets `USER 65532:65532`, and creates the application config directory read-only and the data directory non-world-writable.
-- `tools/build_app.sh` verifies upstream signed checksum files, release archive SHA256 values, and extracted application binary SHA256 values before the binary enters the image build context; RPM content is added only in the `ubi-minimal` builder through GPG-checked microdnf from Red Hat repositories.
+- `containers/Dockerfile` builds the final image `FROM` Red Hat `ubi-micro`, installs only the from-source `aws_signing_helper` binary, its shared libraries, and the CA bundle at `/etc/pki/tls/certs/ca-bundle.crt`, sets `USER 65532:65532`, and exposes only the helper entrypoint.
+- The `gobuild` stage clones `github.com/aws/rolesanywhere-credential-helper` at the manifest-selected `SOURCE_REF`, compiles with `GOFIPS140=v1.0.0`, `CGO_ENABLED=1`, and `GOTOOLCHAIN=local`, then fails closed unless `go version -m` records the FIPS/cgo/module provenance and `readelf` confirms a dynamic ELF before the binary enters the runtime stage. `application.verification.type` is `none`; this repo does not verify a signed upstream source checksum or commit SHA.
+- RPM content is added only in the `ubi-minimal` builder through GPG-checked microdnf from Red Hat repositories, and the rpmdb is preserved so OpenSCAP, Trivy, and Grype can enumerate installed packages.
 - `tests/runtime-hardening.sh` exports the built rootfs and asserts no shell, no dnf/microdnf/rpm/yum, no curl/wget, no package-manager cache state beyond the read-only rpmdb preserved at `/var/lib/rpm`, a non-root runtime user, the application entrypoint, read-only-rootfs compatibility, dropped capabilities, no-new-privileges, no network for smoke validation, no setuid/setgid regular files, sticky world-writable dirs, and root-owned command/library metadata.
 - The rootfs inspection is intentionally component-based rather than tied to a
   fixed file count; it checks for absence of PAM, SSSD, SSH daemon, systemd,
@@ -47,7 +48,7 @@ This checklist records the image-scope decision for every rule in the DISA Red H
 
 | V-ID | STIG ID | Severity | Rule | Decision | Rationale and Verification |
 | --- | --- | --- | --- | --- | --- |
-| V-257777 | RHEL-09-211010 | HIGH | RHEL 9 must be a vendor-supported release. | `APPROVED_IMAGE_CONTROL` | Approved. The base layers are Red Hat UBI 9 (ubi-minimal builder, ubi-micro runtime), a vendor-supported Red Hat release, and the application binary is an official upstream release pinned by digest in the manifest. |
+| V-257777 | RHEL-09-211010 | HIGH | RHEL 9 must be a vendor-supported release. | `APPROVED_IMAGE_CONTROL` | Approved. The base layers are Red Hat UBI 9 (ubi-minimal builder, ubi-micro runtime), a vendor-supported Red Hat release. The application binary is compiled inside `containers/Dockerfile` from the official AWS Roles Anywhere Credential Helper repository at the manifest-selected release tag, with FIPS/cgo/module provenance asserted before it reaches the runtime stage. |
 | V-257778 | RHEL-09-211015 | MEDIUM | RHEL 9 vendor packaged system security patches and updates must be installed and up to date. | `APPROVED_COMPENSATING_CONTROL` | Approved with image-native compensation. The image carries no in-place updater; currency is maintained by rebuilding from digest-pinned UBI 9 bases on a scheduled cadence with vulnerability scanning, and the rpmdb at /var/lib/rpm lets scanners enumerate installed RPM versions. |
 | V-257779 | RHEL-09-211020 | MEDIUM | RHEL 9 must display the Standard Mandatory DOD Notice and Consent Banner before granting local or remote access to the system via a command line user logon. | `DISPROVED_UBI_MICRO_ABSENT` | Disproved for ubi-micro image applicability. The final image intentionally omits the referenced full-OS component, login path, service, daemon, GUI, PAM/SSSD stack, package manager, account database, or local scheduler; ubi-micro ships no shell and adding the component would expand the attack surface without serving the application. |
 | V-257781 | RHEL-09-211030 | MEDIUM | The graphical display manager must not be the default target on RHEL 9 unless approved. | `DISPROVED_UBI_MICRO_ABSENT` | Disproved for ubi-micro image applicability. The final image intentionally omits the referenced full-OS component, login path, service, daemon, GUI, PAM/SSSD stack, package manager, account database, or local scheduler; ubi-micro ships no shell and adding the component would expand the attack surface without serving the application. |

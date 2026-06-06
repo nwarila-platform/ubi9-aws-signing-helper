@@ -1,164 +1,84 @@
-# Publish A Derived Image
+# Publish The Image
 
-Use this pattern in downstream image repositories once the manifest points at
-real application inputs and a registry destination exists. Keep the local
-`make image` flow for fast runtime checks; use the publish flow for digest
-evidence.
+`.github/workflows/publish-image.yaml` is the release path for this repository.
+It builds the multi-platform image from the reviewed manifest, pushes the image
+to GHCR by digest, and verifies image-level evidence against that digest.
 
-## Release Contract
+## When It Runs
 
-The release job should:
+The workflow runs on:
 
-1. Build application artifacts and verify their SHA256 values against the
-   reviewed manifest.
-2. Build and push the image by digest with BuildKit SBOM and provenance
-   enabled. Because the runtime rootfs keeps the rpm database at
-   `/var/lib/rpm`, the SBOM and scanners see every installed package.
-3. Generate a GitHub artifact attestation for the pushed image digest.
-4. Sign the pushed digest with Cosign/Sigstore keyless, using `--recursive`
-   so attached SBOM and attestation manifests are signed too.
-5. Scan and compliance-check the pushed digest: OpenSCAP against the RHEL 9
-   STIG profile, plus Trivy and Grype.
-6. Run runtime hardening against the same digest, not a mutable tag.
+- Pushes to `main`.
+- Tags matching `v*`.
+- Manual `workflow_dispatch`.
 
-Docker's local `--load` exporter is not an evidence path. It is useful for
-runtime tests, but it does not preserve image attestations in the Docker image
-store. Use a registry push for release evidence, or the local/tar exporter when
-you are validating SBOM files before a push.
+The workflow filename is part of the keyless Cosign identity check, so do not
+rename it without updating the verification policy and related ADRs.
 
-## Workflow Skeleton
+## Release Flow
 
-Pin every `uses:` value to a reviewed commit SHA before enabling this in a real
-repository. The tags below are orientation labels, not pins.
+The publish job performs these steps:
 
-```yaml
-name: Publish image
+1. Checks out the repository with a pinned `actions/checkout` commit.
+2. Sets up Python, QEMU, Docker Buildx, and Cosign with pinned action SHAs.
+3. Logs in to GHCR with the GitHub Actions token.
+4. Runs `tools/generate_build_args.py examples/image-manifest.json` and writes
+   the Buildx arguments to `dist/buildargs.txt`.
+5. Runs `docker buildx build` for the manifest-selected platforms with
+   `--provenance=mode=max`, `--sbom=true`, and `--push`.
+6. Extracts the pushed digest from `dist/image-metadata.json`.
+7. Generates a GitHub artifact attestation for the pushed image digest.
+8. Signs the pushed digest recursively with keyless Cosign.
+9. Verifies the GitHub artifact attestation.
+10. Verifies the Cosign signature identity and OIDC issuer.
+11. Builds the OpenSCAP RHEL 9 STIG datastream from a SHA512-pinned
+    ComplianceAsCode release and uploads the advisory scorecard.
+12. Runs Trivy and Grype vulnerability gates against the pushed digest.
+13. Runs `tests/runtime-hardening.sh` against the pushed digest.
+14. Runs `tools/verify_public_ghcr_pull.sh` to prove the image is anonymously
+    pullable from GHCR.
 
-on:
-  push:
-    tags:
-      - "v*"
-  workflow_dispatch:
+The helper binary is compiled during the Dockerfile build for each target
+platform. The release workflow does not build or verify a separate binary
+artifact before Docker Buildx runs.
 
-permissions:
-  contents: read
+## Evidence To Review
 
-env:
-  MANIFEST: examples/image-manifest.json
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+For a completed release, review:
 
-jobs:
-  publish:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      id-token: write
-      packages: write
-      attestations: write
-      artifact-metadata: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@<40-char-sha> # v6.0.2
-        with:
-          fetch-depth: 1
-          persist-credentials: false
+- The pushed image reference and digest emitted by the `Build and push image
+  with BuildKit attestations` step.
+- BuildKit SBOM and provenance attached to the pushed OCI image.
+- The GitHub artifact attestation verification output.
+- The Cosign verification output, including the expected workflow identity and
+  `https://token.actions.githubusercontent.com` issuer.
+- OpenSCAP ARF/HTML artifacts, with the caveat that the host STIG scorecard is
+  advisory for a minimal container image.
+- Trivy and Grype gate output.
+- Runtime hardening output against the same digest.
+- Anonymous GHCR pull output.
 
-      - name: Set up Python
-        uses: actions/setup-python@<40-char-sha> # v6.2.0
-        with:
-          python-version: "3.12"
+## Verify Evidence From A Clean Checkout
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@<40-char-sha> # v3.11.1
+After a publish run, verify the attestation and signature against the digest:
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@<40-char-sha>
+```sh
+gh attestation verify oci://ghcr.io/OWNER/ubi9-aws-signing-helper@sha256:DIGEST -R OWNER/ubi9-aws-signing-helper
 
-      - name: Login to registry
-        run: |
-          printf '%s' "${{ secrets.GITHUB_TOKEN }}" \
-            | docker login "${REGISTRY}" \
-                --username "${{ github.actor }}" \
-                --password-stdin
-
-      - name: Build application artifacts
-        run: bash tools/build_app.sh
-
-      - name: Verify application artifact SHAs
-        run: python tools/verify_app_shas.py "${MANIFEST}"
-
-      - name: Generate build arguments
-        run: python tools/generate_build_args.py "${MANIFEST}" > dist/buildargs.txt
-
-      - name: Build and push image
-        id: image
-        run: |
-          mapfile -t buildargs < dist/buildargs.txt
-          image="${REGISTRY}/${IMAGE_NAME}"
-          docker buildx build \
-            --file containers/Dockerfile \
-            --tag "${image}:${GITHUB_SHA}" \
-            --tag "${image}:${GITHUB_REF_NAME}" \
-            --provenance=mode=max \
-            --sbom=true \
-            --metadata-file dist/image-metadata.json \
-            --push \
-            "${buildargs[@]}" \
-            .
-          digest="$(python -c 'import json; print(json.load(open("dist/image-metadata.json"))["containerimage.digest"])')"
-          {
-            printf 'image=%s\n' "${image}"
-            printf 'digest=%s\n' "${digest}"
-            printf 'ref=%s@%s\n' "${image}" "${digest}"
-          } >> "${GITHUB_OUTPUT}"
-
-      - name: Generate GitHub artifact attestation
-        uses: actions/attest@<40-char-sha> # v4
-        with:
-          subject-name: ${{ steps.image.outputs.image }}
-          subject-digest: ${{ steps.image.outputs.digest }}
-          push-to-registry: true
-
-      - name: Sign image digest
-        env:
-          COSIGN_YES: "true"
-        run: cosign sign --recursive "${{ steps.image.outputs.ref }}"
-
-      - name: Scan and compliance-check published image
-        run: |
-          # OpenSCAP RHEL 9 STIG profile, plus Trivy and Grype, against the
-          # pushed digest. Fail the release on findings above the agreed
-          # severity bar.
-          trivy image --severity HIGH,CRITICAL --exit-code 1 "${{ steps.image.outputs.ref }}"
-          grype "${{ steps.image.outputs.ref }}" --fail-on high
-
-      - name: Test published image hardening
-        run: bash tests/runtime-hardening.sh "${{ steps.image.outputs.ref }}"
+cosign verify ghcr.io/OWNER/ubi9-aws-signing-helper@sha256:DIGEST \
+  --certificate-identity-regexp 'https://github.com/OWNER/ubi9-aws-signing-helper/.github/workflows/publish-image.yaml@refs/(heads/main|tags/v.*)' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
+
+Use the digest, not a mutable tag, when reviewing release evidence.
 
 ## Review Rules
 
-- Do not pass secrets as Docker build args. BuildKit max provenance can expose
-  build argument values.
-- Attest and sign `image@sha256:...`, not a mutable tag.
-- Keep registry credentials in GitHub Actions secrets or OIDC-backed registry
-  auth, not in the manifest.
-- For vendor release binaries, verify upstream checksum signatures or Sigstore
-  bundles before writing the artifact SHA256 into the manifest.
-- If you need an SBOM file before pushing, build with
-  `docker buildx build --sbom=true --output type=local,dest=dist/evidence .`
-  and inspect `dist/evidence/sbom.spdx.json`.
-
-## Verification
-
-After the workflow publishes an image, verify the evidence from a clean
-checkout:
-
-```sh
-gh attestation verify oci://ghcr.io/OWNER/IMAGE:TAG -R OWNER/REPO
-cosign verify ghcr.io/OWNER/IMAGE@sha256:DIGEST \
-  --certificate-identity-regexp 'https://github.com/OWNER/REPO/.github/workflows/.*' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
+- Keep every `uses:` action pinned to a reviewed commit SHA.
+- Keep registry authentication in GitHub Actions permissions and token scope,
+  not in the manifest or Docker build arguments.
+- Attest, sign, scan, and harden the pushed digest.
+- Treat the OpenSCAP STIG output as advisory unless a repo ADR changes the gate;
+  Trivy and Grype are the hard vulnerability gates.
+- Do not claim upstream source signature validation until the manifest and
+  Dockerfile implement it.
